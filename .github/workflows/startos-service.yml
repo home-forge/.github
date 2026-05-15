@@ -1,0 +1,160 @@
+name: StartoOS Service CI/CD
+
+on:
+  workflow_call:
+    inputs:
+      run_build:
+        description: Run multi-arch Docker build and package to .s9pk
+        type: boolean
+        default: false
+      deploy_to_dev:
+        description: Deploy .s9pk to Pi dev StartoOS after build
+        type: boolean
+        default: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint manifest.yaml
+        run: pip install yamllint --quiet && yamllint manifest.yaml
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+
+      - name: Setup Deno
+        if: hashFiles('scripts/**/*.ts') != ''
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Deno lint
+        if: hashFiles('scripts/**/*.ts') != ''
+        run: deno lint scripts/
+
+      - name: Deno test
+        if: hashFiles('scripts/**/*.test.ts') != ''
+        run: deno test scripts/ --allow-read
+
+      - name: Setup Go
+        if: hashFiles('go.mod') != ''
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Go test
+        if: hashFiles('go.mod') != ''
+        run: go test ./...
+
+  # Builds linux/amd64 natively on GitHub-hosted runner
+  build-amd64:
+    if: inputs.run_build
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/${{ github.repository }}:${{ github.sha }}-amd64
+
+  # Builds linux/arm64 natively on the Pi self-hosted runner (no QEMU)
+  build-arm64:
+    if: inputs.run_build
+    runs-on: [self-hosted, arm64, linux]
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository }}:${{ github.sha }}-arm64
+
+  # Combines the two arch images, runs start-sdk build + verify, uploads .s9pk
+  package:
+    if: inputs.run_build
+    needs: [build-amd64, build-arm64]
+    runs-on: [self-hosted, arm64, linux]
+    permissions:
+      packages: write
+    outputs:
+      s9pk_name: ${{ steps.find.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Combine into multi-arch manifest
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/${{ github.repository }}:${{ github.sha }} \
+            ghcr.io/${{ github.repository }}:${{ github.sha }}-amd64 \
+            ghcr.io/${{ github.repository }}:${{ github.sha }}-arm64
+
+      - name: Build .s9pk
+        run: make s9pk
+        env:
+          DOCKER_REPO: ghcr.io/${{ github.repository }}
+          DOCKER_TAG: ${{ github.sha }}
+
+      - name: Verify .s9pk
+        run: make verify
+
+      - name: Find .s9pk filename
+        id: find
+        run: echo "name=$(ls *.s9pk | head -1)" >> $GITHUB_OUTPUT
+
+      - name: Upload .s9pk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-package
+          path: "*.s9pk"
+          retention-days: 7
+
+  # Deploys the .s9pk to the Pi dev StartoOS instance via start-cli
+  deploy-to-dev:
+    if: inputs.deploy_to_dev
+    needs: [package]
+    runs-on: [self-hosted, arm64, linux]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: service-package
+
+      - name: Deploy to dev StartoOS
+        run: ~/skills/deploy_to_dev.sh "${{ github.event.repository.name }}" "${{ needs.package.outputs.s9pk_name }}"
