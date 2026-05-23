@@ -29,6 +29,25 @@ jobs:
         with:
           dockerfile: Dockerfile
 
+      - name: No lint suppressions
+        run: |
+          found=$(grep -rn \
+            -e "hadolint ignore" \
+            -e "# noqa" \
+            -e "# type: ignore" \
+            -e "eslint-disable" \
+            -e "//nolint" \
+            --include="Dockerfile*" \
+            --include="*.py" \
+            --include="*.ts" \
+            --include="*.go" \
+            . 2>/dev/null || true)
+          if [[ -n "$found" ]]; then
+            echo "ERROR: lint suppression directives are not allowed — fix the root cause"
+            echo "$found"
+            exit 1
+          fi
+
       - name: Setup Deno
         if: hashFiles('scripts/**/*.ts') != ''
         uses: denoland/setup-deno@v2
@@ -165,4 +184,5 @@ jobs:
 
       - name: Deploy to dev StartoOS
         run: ~/skills/deploy_to_dev.sh "${{ github.event.repository.name }}" "${{ needs.package.outputs.s9pk_name }}"
+
 
