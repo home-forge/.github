@@ -129,6 +129,10 @@ jobs:
             ghcr.io/${{ github.repository }}:${{ github.sha }}-amd64 \
             ghcr.io/${{ github.repository }}:${{ github.sha }}-arm64
 
+      - name: Install npm dependencies
+        if: hashFiles('package-lock.json') != ''
+        run: npm ci
+
       - name: Build .s9pk
         run: make s9pk
         env:
@@ -161,3 +165,4 @@ jobs:
 
       - name: Deploy to dev StartoOS
         run: ~/skills/deploy_to_dev.sh "${{ github.event.repository.name }}" "${{ needs.package.outputs.s9pk_name }}"
+
