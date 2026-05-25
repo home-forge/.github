@@ -132,6 +132,7 @@ jobs:
       packages: write
     outputs:
       s9pk_name: ${{ steps.find.outputs.name }}
+      service_id: ${{ steps.find.outputs.service_id }}
     steps:
       - uses: actions/checkout@v4
 
@@ -161,9 +162,11 @@ jobs:
       - name: Verify .s9pk
         run: make verify
 
-      - name: Find .s9pk filename
+      - name: Find .s9pk filename and service ID
         id: find
-        run: echo "name=$(ls *.s9pk | head -1)" >> $GITHUB_OUTPUT
+        run: |
+          echo "name=$(ls *.s9pk | head -1)" >> $GITHUB_OUTPUT
+          echo "service_id=$(grep '^id:' manifest.yaml | head -1 | sed 's/^id:[[:space:]]*//' | tr -d '\"')" >> $GITHUB_OUTPUT
 
       - name: Upload .s9pk artifact
         uses: actions/upload-artifact@v4
@@ -187,5 +190,5 @@ jobs:
 
       - name: Deploy to dev StartoOS
         run: ~/skills/deploy_to_dev.sh "${{ github.event.repository.name }}" "${{ needs.package.outputs.s9pk_name }}"
-
-
+        env:
+          SERVICE_ID: ${{ needs.package.outputs.service_id }}
