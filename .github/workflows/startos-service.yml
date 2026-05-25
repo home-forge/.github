@@ -182,6 +182,9 @@ jobs:
         with:
           name: service-package
 
+      - name: Update runner scripts
+        run: git -C ~/home-forge/home-forge-setup pull --ff-only
+
       - name: Deploy to dev StartoOS
         run: ~/skills/deploy_to_dev.sh "${{ github.event.repository.name }}" "${{ needs.package.outputs.s9pk_name }}"
 
