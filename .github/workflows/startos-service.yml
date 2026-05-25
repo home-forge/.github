@@ -185,18 +185,18 @@ jobs:
         with:
           name: service-package
 
-      # Sparse-checkout just manifest.yaml so we can read the real package ID
-      # without depending on package job outputs (which are absent on job re-runs
-      # when the original package job ran against an older workflow version).
+      # Sparse-checkout just manifest.yaml into a subdirectory so it doesn't
+      # clobber the downloaded artifact (git clean runs during checkout).
       - uses: actions/checkout@v4
         with:
           sparse-checkout: manifest.yaml
           sparse-checkout-cone-mode: false
+          path: .svc-manifest
 
       - name: Read service ID from manifest
         id: manifest
         run: |
-          sid=$(grep '^id:' manifest.yaml | head -1 | sed 's/^id:[[:space:]]*//' | tr -d '"')
+          sid=$(grep '^id:' .svc-manifest/manifest.yaml | head -1 | sed 's/^id:[[:space:]]*//' | tr -d '"')
           echo "service_id=${sid}" >> "$GITHUB_OUTPUT"
           echo "Service ID: ${sid}"
 
