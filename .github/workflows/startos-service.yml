@@ -186,7 +186,12 @@ jobs:
           name: service-package
 
       - name: Update runner scripts
-        run: git -C ~/home-forge/home-forge-setup pull --ff-only
+        run: |
+          git -C ~/home-forge/home-forge-setup fetch --depth=1 origin main
+          git -C ~/home-forge/home-forge-setup reset --hard origin/main
+          echo "home-forge-setup at: $(git -C ~/home-forge/home-forge-setup rev-parse --short HEAD)"
+          echo "deploy_to_dev.sh first lines:"
+          head -5 ~/home-forge/home-forge-setup/scripts/deploy_to_dev.sh
 
       - name: Deploy to dev StartoOS
         run: ~/skills/deploy_to_dev.sh "${{ github.event.repository.name }}" "${{ needs.package.outputs.s9pk_name }}"
