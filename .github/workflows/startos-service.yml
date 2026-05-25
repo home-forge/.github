@@ -185,15 +185,28 @@ jobs:
         with:
           name: service-package
 
+      # Sparse-checkout just manifest.yaml so we can read the real package ID
+      # without depending on package job outputs (which are absent on job re-runs
+      # when the original package job ran against an older workflow version).
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: manifest.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Read service ID from manifest
+        id: manifest
+        run: |
+          sid=$(grep '^id:' manifest.yaml | head -1 | sed 's/^id:[[:space:]]*//' | tr -d '"')
+          echo "service_id=${sid}" >> "$GITHUB_OUTPUT"
+          echo "Service ID: ${sid}"
+
       - name: Update runner scripts
         run: |
           git -C ~/home-forge/home-forge-setup fetch --depth=1 origin main
           git -C ~/home-forge/home-forge-setup reset --hard origin/main
           echo "home-forge-setup at: $(git -C ~/home-forge/home-forge-setup rev-parse --short HEAD)"
-          echo "deploy_to_dev.sh first lines:"
-          head -5 ~/home-forge/home-forge-setup/scripts/deploy_to_dev.sh
 
       - name: Deploy to dev StartoOS
         run: ~/skills/deploy_to_dev.sh "${{ github.event.repository.name }}" "${{ needs.package.outputs.s9pk_name }}"
         env:
-          SERVICE_ID: ${{ needs.package.outputs.service_id }}
+          SERVICE_ID: ${{ steps.manifest.outputs.service_id }}
