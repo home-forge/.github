@@ -122,6 +122,12 @@ jobs:
           push: true
           tags: ghcr.io/${{ github.repository }}:${{ github.sha }}-arm64
 
+      - name: Prune Docker images and build cache
+        if: always()
+        run: |
+          docker image prune -af
+          docker builder prune -f --filter "until=24h"
+
   # Combines the two arch images, runs start-sdk build + verify, uploads .s9pk
   package:
     if: inputs.run_build
@@ -174,6 +180,10 @@ jobs:
           name: service-package
           path: "*.s9pk"
           retention-days: 7
+
+      - name: Prune Docker images
+        if: always()
+        run: docker image prune -af
 
   # Deploys the .s9pk to the Pi dev StartoOS instance via start-cli
   deploy-to-dev:
