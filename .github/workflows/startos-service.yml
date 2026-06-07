@@ -174,13 +174,6 @@ jobs:
           echo "name=$(ls *.s9pk | head -1)" >> $GITHUB_OUTPUT
           echo "service_id=$(grep '^id:' manifest.yaml | head -1 | sed 's/^id:[[:space:]]*//' | tr -d '\"')" >> $GITHUB_OUTPUT
 
-      - name: Upload .s9pk artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: service-package
-          path: "*.s9pk"
-          retention-days: 1
-
       - name: Prune Docker images
         if: always()
         run: docker image prune -af
@@ -191,18 +184,15 @@ jobs:
     needs: [package]
     runs-on: [self-hosted, arm64, linux]
     steps:
-      # manifest.yaml is already on disk from the package job (same runner, same
-      # workspace) — no checkout needed. Read service ID directly from it.
+      # manifest.yaml and the .s9pk are already on disk from the package job
+      # (same runner, same workspace) — no checkout or artifact download needed.
+      # Read service ID directly from the manifest.
       - name: Read service ID from manifest
         id: manifest
         run: |
           sid=$(grep '^id:' manifest.yaml | head -1 | sed 's/^id:[[:space:]]*//' | tr -d '"')
           echo "service_id=${sid}" >> "$GITHUB_OUTPUT"
           echo "Service ID: ${sid}"
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: service-package
 
       - name: Update runner scripts
         run: |
