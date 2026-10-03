@@ -183,6 +183,12 @@ jobs:
     if: inputs.deploy_to_dev
     needs: [package]
     runs-on: [self-hosted, arm64, linux]
+    # Two deploys of the same service must not race each other on the dev host.
+    # Groups are repo-scoped; cross-service serialization relies on the single runner
+    # plus the flock in deploy_to_dev.sh.
+    concurrency:
+      group: dev-deploy-${{ github.repository }}
+      cancel-in-progress: false
     steps:
       # manifest.yaml and the .s9pk are already on disk from the package job
       # (same runner, same workspace) — no checkout or artifact download needed.
