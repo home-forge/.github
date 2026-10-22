@@ -173,6 +173,7 @@ jobs:
       packages: write
     outputs:
       s9pk_name: ${{ steps.find.outputs.name }}
+      s9pk_path: ${{ steps.find.outputs.s9pk_path }}
       service_id: ${{ steps.find.outputs.service_id }}
     steps:
       - uses: actions/checkout@v4
@@ -203,11 +204,29 @@ jobs:
       - name: Verify .s9pk
         run: make verify
 
-      - name: Find .s9pk filename and service ID
+      # The runner workspace is shared: a later package job (e.g. a feature PR) re-checks
+      # it out and replaces the .s9pk before this run's deploy-to-dev starts. Copy the
+      # artifact to a per-run directory that deploy-to-dev reads instead of the workspace.
+      # Keyed by run_id (not run_attempt) so re-running only deploy-to-dev still finds it.
+      - name: Find .s9pk, service ID and hand off
         id: find
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          echo "name=$(ls *.s9pk | head -1)" >> $GITHUB_OUTPUT
-          echo "service_id=$(grep '^id:' manifest.yaml | head -1 | sed 's/^id:[[:space:]]*//' | tr -d '\"')" >> $GITHUB_OUTPUT
+          name=$(ls *.s9pk | head -1)
+          sid=$(grep '^id:' manifest.yaml | head -1 | sed 's/^id:[[:space:]]*//' | tr -d '"')
+          HANDOFF_ROOT="$HOME/s9pk-handoff"
+          HANDOFF_DIR="$HANDOFF_ROOT/$REPO_NAME/$RUN_ID"
+          mkdir -p "$HANDOFF_DIR"
+          cp "$name" "$HANDOFF_DIR/$name"
+          # Drop handoffs that no deploy cleaned up (failed or abandoned runs).
+          find "$HANDOFF_ROOT" -mindepth 2 -maxdepth 2 -type d -mtime +2 -exec rm -rf {} +
+          find "$HANDOFF_ROOT" -mindepth 1 -type d -empty -not -path "$HANDOFF_DIR" -delete
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "service_id=${sid}" >> "$GITHUB_OUTPUT"
+          echo "s9pk_path=${HANDOFF_DIR}/${name}" >> "$GITHUB_OUTPUT"
+          echo "Handed off ${name} to ${HANDOFF_DIR}"
 
       - name: Prune Docker images
         if: always()
@@ -225,15 +244,17 @@ jobs:
       group: dev-deploy-${{ github.repository }}
       cancel-in-progress: false
     steps:
-      # manifest.yaml and the .s9pk are already on disk from the package job
-      # (same runner, same workspace) — no checkout or artifact download needed.
-      # Read service ID directly from the manifest.
-      - name: Read service ID from manifest
-        id: manifest
+      # The .s9pk and service ID come from the package job's per-run handoff directory,
+      # not the workspace: another run's package job may have re-checked it out meanwhile.
+      - name: Verify .s9pk handoff
+        env:
+          S9PK_PATH: ${{ needs.package.outputs.s9pk_path }}
         run: |
-          sid=$(grep '^id:' manifest.yaml | head -1 | sed 's/^id:[[:space:]]*//' | tr -d '"')
-          echo "service_id=${sid}" >> "$GITHUB_OUTPUT"
-          echo "Service ID: ${sid}"
+          if [ ! -f "$S9PK_PATH" ]; then
+            echo "::error::[HANDOFF_MISSING] .s9pk not found at ${S9PK_PATH} — re-run the whole workflow run so the package job rebuilds it"
+            exit 1
+          fi
+          echo "Using ${S9PK_PATH}"
 
       - name: Update runner scripts
         run: |
@@ -242,6 +263,16 @@ jobs:
           echo "home-forge-setup at: $(git -C ~/home-forge/home-forge-setup rev-parse --short HEAD)"
 
       - name: Deploy to dev StartoOS
-        run: ~/skills/deploy_to_dev.sh "${{ github.event.repository.name }}" "${{ needs.package.outputs.s9pk_name }}"
+        run: ~/skills/deploy_to_dev.sh "${{ github.event.repository.name }}" "$S9PK_PATH"
         env:
-          SERVICE_ID: ${{ steps.manifest.outputs.service_id }}
+          S9PK_PATH: ${{ needs.package.outputs.s9pk_path }}
+          SERVICE_ID: ${{ needs.package.outputs.service_id }}
+
+      - name: Remove .s9pk handoff
+        if: success()
+        env:
+          S9PK_PATH: ${{ needs.package.outputs.s9pk_path }}
+        run: |
+          dir=$(dirname "$S9PK_PATH")
+          rm -rf "$dir"
+          rmdir --ignore-fail-on-non-empty "$(dirname "$dir")"
