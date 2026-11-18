@@ -16,18 +16,24 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  # Runs on the Pi runner like the build jobs (which already run PR code): GitHub-hosted
+  # minutes are billed for private repos, and this job ran on every push of every service.
   fast:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, arm64, linux]
     steps:
       - uses: actions/checkout@v4
+
+      # The runner's system Python is externally managed (Ubuntu 24.04): no pip install there.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Lint manifest.yaml
         run: pip install yamllint --quiet && yamllint manifest.yaml
 
+      # The hadolint image is multi-arch (amd64, arm64) and runs directly on the Pi runner.
       - name: Lint Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: Dockerfile
+        run: docker run --rm -i hadolint/hadolint:v2.12.0 < Dockerfile
 
       - name: No lint suppressions
         run: |
